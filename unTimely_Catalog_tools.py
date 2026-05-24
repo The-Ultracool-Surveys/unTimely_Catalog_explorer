@@ -132,7 +132,6 @@ class unTimelyCatalogExplorer:
         return bits, descr
 
     def process_image_data(self, hdu, ra, dec, box_size):
-        data = hdu.data
         wcs, shape = find_optimal_celestial_wcs([hdu], frame='icrs')
         data, _ = reproject_interp(hdu, wcs, shape_out=shape)
         position = SkyCoord(ra*u.deg, dec*u.deg)
@@ -285,10 +284,17 @@ class unTimelyCatalogExplorer:
             opener = 'open' if sys.platform == 'darwin' else 'evince'
             subprocess.call([opener, filename])
 
-    def calculate_magnitude(self, flux):
-        if flux <= 0:
-            return np.nan
-        return 22.5 - 2.5 * math.log10(flux)
+    def flux_to_magnitude(self, flux, flux_err, zeropoint=22.5):
+        if not np.isfinite(flux) or flux <= 0:
+            return np.nan, np.nan
+
+        mag = zeropoint - 2.5 * math.log10(flux)
+
+        if not np.isfinite(flux_err) or flux_err < 0:
+            return mag, np.nan
+
+        mag_err = (2.5 / math.log(10)) * (flux_err / flux)
+        return mag, mag_err
 
     def disable_print(self):
         self.stdout = sys.stdout
@@ -498,16 +504,7 @@ class unTimelyCatalogExplorer:
                     The agreement between unWISE and AllWISE magnitudes can be improved by subtracting 4 mmag and 32 mmag from W1 and W2.
                 """
                 # Calculate Vega magnitude from flux
-                # flux_corr = 4 if band == 1 else 32
-                flux = row['flux']  # - flux_corr
-                mag = self.calculate_magnitude(flux)
-                if np.isnan(mag):
-                    dmag = np.nan
-                else:
-                    dflux = row['dflux']
-                    mag_upper = self.calculate_magnitude(flux - dflux)
-                    mag_lower = self.calculate_magnitude(flux + dflux)
-                    dmag = (mag_upper - mag_lower) / 2
+                mag, dmag = self.flux_to_magnitude(row['flux'], row['dflux'])
 
                 flags_unwise_bits, flags_unwise_descr = self.decompose_flags(row['flags_unwise'], self.unwise_flags)
                 flags_info_bits, flags_info_descr = self.decompose_flags(row['flags_info'], self.unwise_info_flags)
